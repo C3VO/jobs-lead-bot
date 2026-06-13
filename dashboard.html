@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reddit Leads Dashboard</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, sans-serif; margin: 24px; background:#0f172a; color:#e2e8f0; }
+    h1 { margin:0 0 12px 0; display:flex; align-items:center; gap:12px; }
+    .card { background:#111827; border:1px solid #1f2937; border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 10px 30px rgba(0,0,0,0.35); }
+    .grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); }
+    .stat { font-size:13px; color:#9ca3af; }
+    .value { font-size:24px; font-weight:700; color:#f8fafc; }
+    .table { width:100%; border-collapse: collapse; }
+    .table th, .table td { padding:8px; border-bottom:1px solid #1f2937; text-align:left; }
+    .badge { padding:3px 8px; border-radius:8px; font-size:12px; display:inline-block; }
+    .badge.freelance { background:#065f46; color:#ecfdf3; }
+    .badge.job_offer { background:#7f1d1d; color:#fee2e2; }
+    .badge.unknown { background:#334155; color:#e2e8f0; }
+    .badge.hiring { background:#1e3a5f; color:#93c5fd; }
+    .badge.for_hire { background:#3b1f2b; color:#f9a8d4; }
+    .badge.role_unknown { background:#1f2937; color:#6b7280; }
+    .status-btn { border:none; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer; opacity:0.5; transition:opacity 0.15s; }
+    .status-btn.active { opacity:1; }
+    .status-btn.s-new { background:#1f2937; color:#9ca3af; }
+    .status-btn.s-viewed { background:#1e3a5f; color:#93c5fd; }
+    .status-btn.s-applied { background:#065f46; color:#6ee7b7; }
+    .status-btn.s-pass { background:#450a0a; color:#fca5a5; }
+    tr.status-pass { opacity: 0.4; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+    input, select { background:#0b1224; color:#e2e8f0; border:1px solid #1f2937; border-radius:8px; padding:8px; }
+    button { background:#2563eb; color:white; border:none; border-radius:8px; padding:8px 12px; cursor:pointer; }
+    a { color:#93c5fd; }
+    .spacer { flex:1; }
+    .table th[data-sort] { cursor:pointer; user-select:none; white-space:nowrap; }
+    .table th[data-sort]:hover { color:#f8fafc; }
+    .table th .sort-arrow { margin-left:4px; opacity:0.4; font-size:11px; }
+    .table th.active .sort-arrow { opacity:1; }
+    tr.hot td { background:rgba(251,191,36,0.07); }
+    tr.hot td:nth-child(2) { color:#fbbf24; font-weight:700; }
+    .score-bar { display:inline-block; width:4px; height:14px; border-radius:2px; margin-right:5px; vertical-align:middle; background:#374151; }
+    .score-fill { height:100%; border-radius:2px; }
+    .analytics { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); margin-bottom:16px; }
+    .analytics .card { padding:14px 16px; }
+    .a-title { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#6b7280; margin-bottom:10px; }
+    .a-big { font-size:28px; font-weight:700; color:#f8fafc; line-height:1; }
+    .a-sub { font-size:12px; color:#6b7280; margin-top:4px; }
+    .bar-row { display:flex; align-items:center; gap:8px; margin-top:6px; font-size:12px; }
+    .bar-row span:first-child { width:90px; color:#9ca3af; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .bar-track { flex:1; background:#1f2937; border-radius:3px; height:6px; }
+    .bar-fill { height:100%; border-radius:3px; }
+    .bar-val { width:32px; text-align:right; color:#6b7280; font-size:11px; }
+  </style>
+</head>
+<body>
+  <h1 id="title">Reddit Leads Dashboard</h1>
+  <div class="controls">
+    <label id="lblHours">Hours: <input id="hours" type="number" value="72" min="1" style="width:80px"></label>
+    <label id="lblMinScore">Min score: <input id="minScore" type="number" value="0" min="0" max="10" step="1" style="width:80px"></label>
+    <label id="lblType">Type: <select id="type">
+      <option value="">any</option>
+      <option value="freelance">freelance</option>
+      <option value="job_offer">job_offer</option>
+      <option value="unknown">unknown</option>
+    </select></label>
+    <label id="lblStatus">Status: <select id="statusFilter">
+      <option value="">any</option>
+      <option value="new">new</option>
+      <option value="viewed">viewed</option>
+      <option value="applied">applied</option>
+      <option value="pass">pass</option>
+    </select></label>
+    <label id="lblRole">Role: <select id="role">
+      <option value="">any</option>
+      <option value="hiring">hiring</option>
+      <option value="for_hire">for hire</option>
+      <option value="unknown">unknown</option>
+    </select></label>
+    <label id="lblLimit">Limit: <input id="limit" type="number" value="200" min="10" max="1000" style="width:90px"></label>
+    <button id="reload">Reload</button>
+    <span class="spacer"></span>
+    <label>Lang: <select id="lang">
+      <option value="en">EN</option>
+      <option value="ru">RU</option>
+    </select></label>
+  </div>
+  <div class="analytics" id="stats"></div>
+  <div class="card">
+    <table class="table" id="leadsTable">
+      <thead><tr>
+        <th id="thStatus" data-sort="status"><span class="th-label">Status</span> <span class="sort-arrow">↕</span></th>
+        <th id="thType" data-sort="type"><span class="th-label">Type</span> <span class="sort-arrow">↕</span></th>
+        <th id="thRole" data-sort="role"><span class="th-label">Role</span> <span class="sort-arrow">↕</span></th>
+        <th id="thScore" data-sort="score" class="active"><span class="th-label">Score</span> <span class="sort-arrow">▼</span></th>
+        <th id="thStack" data-sort="stack"><span class="th-label">Stack</span> <span class="sort-arrow">↕</span></th>
+        <th id="thBudget" data-sort="budget"><span class="th-label">Budget</span> <span class="sort-arrow">↕</span></th>
+        <th id="thTitle" data-sort="title"><span class="th-label">Title</span> <span class="sort-arrow">↕</span></th>
+        <th id="thSub" data-sort="subreddit"><span class="th-label">Sub</span> <span class="sort-arrow">↕</span></th>
+        <th id="thWhen" data-sort="date"><span class="th-label">When</span> <span class="sort-arrow">↕</span></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+<script>
+const dict = {
+  en: {
+    title: 'Reddit Leads Dashboard',
+    hours: 'Hours', minScore: 'Min score', type: 'Type', role: 'Role', status: 'Status', limit: 'Limit', reload: 'Reload',
+    any: 'any', freelance: 'freelance', job_offer: 'job offer', unknown: 'unknown',
+    hiring: 'hiring', for_hire: 'for hire',
+    sNew: 'new', sViewed: 'viewed', sApplied: 'applied', sPass: 'pass',
+    thStatus: 'Status', thType: 'Type', thRole: 'Role', thScore: 'Score', thStack: 'Stack', thBudget: 'Budget', thTitle: 'Title', thSub: 'Subreddit', thWhen: 'When',
+    statTotal: 'Total', statAvg: 'Avg score', statBudget: 'With budget', statTypes: 'Types', statSubs: 'Top subs', statStack: 'Top stack',
+    ago_s: 's ago', ago_m: 'm ago', ago_h: 'h ago'
+  },
+  ru: {
+    title: 'Дэшборд вакансий Reddit',
+    hours: 'Часы', minScore: 'Мин. скор', type: 'Тип', role: 'Роль', status: 'Статус', limit: 'Лимит', reload: 'Обновить',
+    any: 'любой', freelance: 'фриланс', job_offer: 'вакансия', unknown: 'неизв.',
+    hiring: 'ищет', for_hire: 'предлагает',
+    sNew: 'новый', sViewed: 'смотрел', sApplied: 'откликнулся', sPass: 'мимо',
+    thStatus: 'Статус', thType: 'Тип', thRole: 'Роль', thScore: 'Скор', thStack: 'Стек', thBudget: 'Бюджет', thTitle: 'Заголовок', thSub: 'Саб', thWhen: 'Когда',
+    statTotal: 'Всего', statAvg: 'Средний скор', statBudget: 'С бюджетом', statTypes: 'Типы', statSubs: 'Топ сабы', statStack: 'Топ стек',
+    ago_s: 'с назад', ago_m: 'м назад', ago_h: 'ч назад'
+  }
+};
+
+let lang = localStorage.getItem('lang') || 'ru';
+let sortBy = localStorage.getItem('sortBy') || 'score';
+let sortDir = localStorage.getItem('sortDir') || 'desc';
+
+const langSelect = document.getElementById('lang');
+langSelect.value = lang;
+langSelect.onchange = () => { lang = langSelect.value; localStorage.setItem('lang', lang); applyLang(); load(); };
+
+function t(key){ return (dict[lang] && dict[lang][key]) || key; }
+
+function updateSortUI() {
+  document.querySelectorAll('.table th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (th.dataset.sort === sortBy) {
+      th.classList.add('active');
+      arrow.textContent = sortDir === 'desc' ? '▼' : '▲';
+    } else {
+      th.classList.remove('active');
+      arrow.textContent = '↕';
+    }
+  });
+}
+
+document.querySelectorAll('.table th[data-sort]').forEach(th => {
+  th.onclick = () => {
+    if (sortBy === th.dataset.sort) {
+      sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      sortBy = th.dataset.sort;
+      sortDir = 'desc';
+    }
+    localStorage.setItem('sortBy', sortBy);
+    localStorage.setItem('sortDir', sortDir);
+    updateSortUI();
+    load();
+  };
+});
+
+function applyLang(){
+  document.getElementById('title').textContent = t('title');
+  document.getElementById('lblHours').firstChild.textContent = t('hours')+': ';
+  document.getElementById('lblMinScore').firstChild.textContent = t('minScore')+': ';
+  document.getElementById('lblType').firstChild.textContent = t('type')+': ';
+  document.getElementById('lblRole').firstChild.textContent = t('role')+': ';
+  document.getElementById('lblLimit').firstChild.textContent = t('limit')+': ';
+  document.getElementById('reload').textContent = t('reload');
+  const typeSelect = document.getElementById('type');
+  typeSelect.options[0].textContent = t('any');
+  typeSelect.options[1].textContent = t('freelance');
+  typeSelect.options[2].textContent = t('job_offer');
+  typeSelect.options[3].textContent = t('unknown');
+  ['thStatus','thType','thRole','thScore','thStack','thBudget','thTitle','thSub','thWhen'].forEach(id => {
+    const el = document.getElementById(id);
+    const label = el.querySelector('.th-label');
+    if (label) label.textContent = t(id.replace('th','th'));
+    // map id → dict key
+  });
+  const thMap = {thStatus:'thStatus',thType:'thType',thRole:'thRole',thScore:'thScore',thStack:'thStack',thBudget:'thBudget',thTitle:'thTitle',thSub:'thSub',thWhen:'thWhen'};
+  Object.entries(thMap).forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    const label = el.querySelector('.th-label') || el;
+    label.textContent = t(key);
+  });
+}
+
+async function load() {
+  const hours = Number(document.getElementById('hours').value) || null;
+  const minScore = Number(document.getElementById('minScore').value)||0;
+  const type = document.getElementById('type').value;
+  const role = document.getElementById('role').value;
+  const statusFilter = document.getElementById('statusFilter').value;
+  const limit = Number(document.getElementById('limit').value)||200;
+  const qs = new URLSearchParams();
+  if (hours) qs.set('hours', hours);
+  if (minScore) qs.set('minScore', minScore);
+  if (type) qs.set('type', type);
+  if (role) qs.set('role', role);
+  if (statusFilter) qs.set('statusFilter', statusFilter);
+  if (limit) qs.set('limit', limit);
+  qs.set('sortBy', sortBy);
+  qs.set('sortDir', sortDir);
+
+  const stats = await fetch('/api/stats' + (hours?`?hours=${hours}`:'' )).then(r=>r.json());
+  const leads = await fetch('/api/leads?'+qs.toString()).then(r=>r.json()).then(x=>x.leads);
+  renderStats(stats);
+  renderLeads(leads);
+}
+function bar(label, count, max, color) {
+  const pct = max ? Math.round(count / max * 100) : 0;
+  return `<div class="bar-row">
+    <span>${label}</span>
+    <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+    <span class="bar-val">${count}</span>
+  </div>`;
+}
+
+function card(title, html) {
+  return `<div class="card"><div class="a-title">${title}</div>${html}</div>`;
+}
+
+function renderStats(s) {
+  const el = document.getElementById('stats');
+  if (!s.total) { el.innerHTML = '<div class="card"><div class="a-sub">Нет данных</div></div>'; return; }
+
+  const hotPct  = Math.round(s.hot  / s.total * 100);
+  const budPct  = Math.round(s.withBudget / s.total * 100);
+
+  // Карточка 1 — главные цифры
+  el.innerHTML = card('Всего лидов', `
+    <div class="a-big">${s.total}</div>
+    <div class="a-sub">🔥 горячих: ${s.hot} (${hotPct}%) &nbsp;·&nbsp; с бюджетом: ${s.withBudget} (${budPct}%)</div>
+    <div class="a-sub" style="margin-top:4px">avg score: ${s.avgScore} &nbsp;·&nbsp; hourly avg: $${s.avgHourly}/hr &nbsp;·&nbsp; fix avg: $${s.avgFixed}</div>
+  `);
+
+  // Карточка 2 — скор
+  el.innerHTML += card('Распределение скора', [
+    bar('🔥 7-10', s.hot,  s.total, '#22c55e'),
+    bar('⚡ 5-6',  s.mid,  s.total, '#f59e0b'),
+    bar('💤 0-4',  s.low,  s.total, '#374151'),
+  ].join(''));
+
+  // Карточка 3 — стек
+  const maxStack = (s.topStack[0] || {}).count || 1;
+  el.innerHTML += card('Топ стек', s.topStack.map(i =>
+    bar(i.stack, i.count, maxStack, '#3b82f6')
+  ).join(''));
+
+  // Карточка 4 — источники
+  const maxSrc = (s.bySource[0] || {}).count || 1;
+  const srcColors = { reddit:'#ff6314', hn:'#f59e0b', wwr:'#22c55e' };
+  el.innerHTML += card('Источники', s.bySource.map(i =>
+    bar(i.source.toUpperCase(), i.count, maxSrc, srcColors[i.source] || '#6b7280')
+  ).join(''));
+
+  // Карточка 5 — топ сабреддиты
+  const maxSub = (s.topSub[0] || {}).count || 1;
+  el.innerHTML += card('Топ сабреддиты', s.topSub.map(i =>
+    bar(i.subreddit, i.count, maxSub, '#8b5cf6')
+  ).join(''));
+}
+function fromNow(ts){
+  const d=new Date((ts||0)*1000);
+  const diff=(Date.now()-d.getTime())/1000;
+  if(diff<60) return `${Math.floor(diff)}${t('ago_s')}`;
+  if(diff<3600) return `${Math.floor(diff/60)}${t('ago_m')}`;
+  if(diff<86400) return `${Math.floor(diff/3600)}${t('ago_h')}`;
+  return d.toLocaleString();
+}
+function scoreColor(s) {
+  if (s >= 8) return '#22c55e';
+  if (s >= 6) return '#f59e0b';
+  if (s >= 4) return '#3b82f6';
+  return '#4b5563';
+}
+
+function budgetLabel(b) {
+  if (!b) return '—';
+  const kinds = { hourly: '/h', monthly: '/mo', fixed: ' fix' };
+  return `$${b.amount}${kinds[b.kind] || ''}`;
+}
+
+function renderLeads(leads){
+  const tbody=document.querySelector('#leadsTable tbody');
+  tbody.innerHTML='';
+  leads.forEach(l=>{
+    const tr=document.createElement('tr');
+    const score = l.score || 0;
+    const status = l.status || 'new';
+    if (score >= 7) tr.classList.add('hot');
+    if (status === 'pass') tr.classList.add('status-pass');
+    const typeLabel = t(l.type) || l.type || 'n/a';
+    const flame = score >= 7 ? '🔥 ' : '';
+    const stackText = (l.stack||[]).join(', ') || '—';
+    const roleKey = l.postRole || 'unknown';
+    const roleCls = roleKey === 'unknown' ? 'role_unknown' : roleKey;
+    const roleLabel = t(roleKey) || roleKey;
+    const statuses = ['new','viewed','applied','pass'];
+    const statusLabels = {new: t('sNew'), viewed: t('sViewed'), applied: t('sApplied'), pass: t('sPass')};
+    const statusBtns = statuses.map(s =>
+      `<button class="status-btn s-${s} ${status===s?'active':''}" data-id="${l.id}" data-status="${s}">${statusLabels[s]}</button>`
+    ).join(' ');
+    tr.innerHTML=`
+      <td style="white-space:nowrap">${statusBtns}</td>
+      <td><span class="badge ${l.type}">${typeLabel}</span></td>
+      <td><span class="badge ${roleCls}">${roleLabel}</span></td>
+      <td>
+        <span class="score-bar"><span class="score-fill" style="width:100%;background:${scoreColor(score)}"></span></span>
+        <span style="color:${scoreColor(score)};font-weight:600">${score}</span>
+      </td>
+      <td style="font-size:12px;color:#94a3b8">${stackText}</td>
+      <td style="white-space:nowrap">${budgetLabel(l.budget)}</td>
+      <td><a href="${l.link}" target="_blank" rel="noopener">${flame}${l.title||''}</a></td>
+      <td style="font-size:12px;color:#64748b">${l.subreddit}</td>
+      <td style="font-size:12px;white-space:nowrap">${fromNow(l.created_utc)}</td>
+    `;
+    tbody.appendChild(tr);
+  })
+}
+
+document.getElementById('reload').onclick = load;
+
+document.querySelector('#leadsTable tbody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.status-btn');
+  if (!btn) return;
+  const { id, status } = btn.dataset;
+  await fetch('/api/status', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({id, status})
+  });
+  // Обновляем кнопки в строке без перезагрузки всей таблицы
+  const row = btn.closest('tr');
+  row.querySelectorAll('.status-btn').forEach(b => b.classList.toggle('active', b.dataset.status === status));
+  row.classList.toggle('status-pass', status === 'pass');
+});
+
+applyLang();
+updateSortUI();
+load();
+</script>
+</body>
+</html>
