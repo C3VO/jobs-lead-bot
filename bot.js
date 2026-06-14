@@ -795,9 +795,13 @@ async function getFxRates() {
 function toUSD(amount, currency, rates) {
     if (!amount) return null;
     if (!currency || currency === "USD") return amount;
-    const rate = rates[currency];
-    if (!rate) return amount;
-    return Math.round(amount / rate);
+    const usdRate = rates["USD"]; // UAH per 1 USD
+    if (!usdRate) return amount;
+    if (currency === "UAH") return Math.round(amount / usdRate);
+    // Other currency: amount → UAH → USD
+    const toUah = rates[currency]; // UAH per 1 unit of currency
+    if (!toUah) return amount;
+    return Math.round((amount * toUah) / usdRate);
 }
 
 // ─── Freelancehunt ─────────────────────────────────────────────────────────
