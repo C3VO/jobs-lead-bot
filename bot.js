@@ -791,6 +791,7 @@ function analyzeFhProject(p) {
         link: (p.links?.self?.href || `https://freelancehunt.com/project/${p.id}`),
         title,
         body,
+        created_utc: attrs.published_at ? Math.floor(new Date(attrs.published_at).getTime() / 1000) : Math.floor(Date.now() / 1000),
         budget,
         deadline,
         type,
