@@ -788,7 +788,7 @@ function analyzeFhProject(p) {
         source: "freelancehunt",
         subreddit: "Freelancehunt",
         author: attrs.employer?.login || "unknown",
-        link: (p.links?.self?.href || `https://freelancehunt.com/project/${p.id}`),
+        link: (p.links?.self?.web || `https://freelancehunt.com/project/${p.id}`),
         title,
         body,
         created_utc: attrs.published_at ? Math.floor(new Date(attrs.published_at).getTime() / 1000) : Math.floor(Date.now() / 1000),
@@ -806,46 +806,55 @@ function analyzeFhProject(p) {
 async function runFhOnce(seen, toSend) {
     if (!FH_TOKEN) return;
 
-    const params = new URLSearchParams({ "page[limit]": "50" });
-    if (FH_SKILL_IDS) params.set("filter[skill_id]", FH_SKILL_IDS);
-
-    let res;
-    try {
-        res = await fetch(`https://api.freelancehunt.com/v2/projects?${params}`, {
-            headers: { Authorization: `Bearer ${FH_TOKEN}`, "Accept-Language": "ru" },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-        logError("Freelancehunt: ошибка запроса:", e.message);
-        return;
-    }
-
-    const data = await res.json();
-    const projects = data.data || [];
+    const skillIds = FH_SKILL_IDS ? FH_SKILL_IDS.split(",").map((s) => s.trim()) : [null];
+    let totalFetched = 0;
     let matched = 0;
 
-    for (const p of projects) {
-        const seenKey = `fh_${p.id}`;
-        if (seen.has(seenKey)) continue;
+    for (const skillId of skillIds) {
+        const url = new URL("https://api.freelancehunt.com/v2/projects");
+        url.searchParams.set("page[limit]", "20");
+        if (skillId) url.searchParams.set("filter[skill_id]", skillId);
 
-        const attrs = p.attributes || {};
-        const text = `${attrs.name || ""}\n${attrs.description || ""}`;
-        if (!CONFIG.keywords.some((k) => keywordMatches(text, k))) {
-            seen.add(seenKey);
+        let res;
+        try {
+            res = await fetch(url.toString(), {
+                headers: { Authorization: `Bearer ${FH_TOKEN}`, "Accept-Language": "ru" },
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (e) {
+            logError(`Freelancehunt skill ${skillId}: ошибка:`, e.message);
             continue;
         }
 
-        matched++;
-        const lead = analyzeFhProject(p);
-        appendLead(lead);
+        const data = await res.json();
+        const projects = data.data || [];
+        totalFetched += projects.length;
 
-        if (lead.score >= CONFIG.tgMinScore) {
-            toSend.push({ type: "lead", lead });
+        for (const p of projects) {
+            const seenKey = `fh_${p.id}`;
+            if (seen.has(seenKey)) continue;
+
+            const attrs = p.attributes || {};
+            const text = `${attrs.name || ""}\n${attrs.description || ""}`;
+            if (!CONFIG.keywords.some((k) => keywordMatches(text, k))) {
+                seen.add(seenKey);
+                continue;
+            }
+
+            matched++;
+            const lead = analyzeFhProject(p);
+            appendLead(lead);
+
+            if (lead.score >= CONFIG.tgMinScore) {
+                toSend.push({ type: "lead", lead });
+            }
+            seen.add(seenKey);
         }
-        seen.add(seenKey);
+
+        if (CONFIG.requestDelayMs) await sleep(CONFIG.requestDelayMs);
     }
 
-    log(`Freelancehunt: получено ${projects.length} проектов, подошло ${matched}`);
+    log(`Freelancehunt: получено ${totalFetched} проектов, подошло ${matched}`);
 }
 
 async function tgSend(text) {
