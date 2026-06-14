@@ -471,9 +471,16 @@ function formatMessage(p, title, snippet, score = 0) {
 function formatLeadSummary(lead) {
     const stack = lead.stack?.length ? `Стек: ${lead.stack.join(", ")}` : "Стек: нет точного совпадения";
     const budgetKindMap = { hourly: "/час", monthly: "/мес", fixed: " фикс" };
-    const budget = lead.budget
-        ? `Бюджет: ~$${lead.budget.amount}${budgetKindMap[lead.budget.kind] || ""}`
-        : "Бюджет не указан";
+    const currencySymbol = { USD: "$", EUR: "€", UAH: "₴", RUB: "₽" };
+    let budget = "Бюджет не указан";
+    if (lead.budget) {
+        const sym = currencySymbol[lead.budget.currency] || "$";
+        budget = `Бюджет: ~${sym}${lead.budget.amount}${budgetKindMap[lead.budget.kind] || ""}`;
+        if (lead.budgetOriginal) {
+            const origSym = currencySymbol[lead.budgetOriginal.currency] || "";
+            budget += ` (${origSym}${lead.budgetOriginal.amount})`;
+        }
+    }
     const type = `Тип: ${lead.type}`;
     const score = `Скор: ${lead.score}/10`;
     return `${stack}\n${budget}\n${type}\n${score}`;
@@ -760,6 +767,36 @@ async function runWwrOnce(seen, toSend) {
     log(`WWR: получено ${totalFetched} вакансий, подошло ${totalMatched}`);
 }
 
+// ─── Currency conversion ────────────────────────────────────────────────────
+
+const fxCache = { rates: { USD: 1 }, updatedAt: 0 };
+
+async function getFxRates() {
+    if (Date.now() - fxCache.updatedAt < 3_600_000) return fxCache.rates;
+    try {
+        const res = await fetch("https://api.privatbank.ua/p24api/pubinfo?exchange&coursid=5");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rates = { USD: 1 };
+        for (const item of data) {
+            if (item.ccy && item.sale) rates[item.ccy] = parseFloat(item.sale);
+        }
+        fxCache.rates = rates;
+        fxCache.updatedAt = Date.now();
+    } catch (e) {
+        logError("FX: не удалось обновить курс:", e.message);
+    }
+    return fxCache.rates;
+}
+
+function toUSD(amount, currency, rates) {
+    if (!amount) return null;
+    if (!currency || currency === "USD") return amount;
+    const rate = rates[currency];
+    if (!rate) return amount;
+    return Math.round(amount / rate);
+}
+
 // ─── Freelancehunt ─────────────────────────────────────────────────────────
 
 const FH_TOKEN = ENV.FH_TOKEN || null;
@@ -774,7 +811,8 @@ function analyzeFhProject(p) {
     const title = attrs.name || "";
     const body = attrs.description || "";
     const full = `${title}\n${body}`;
-    const budget = attrs.budget ? { amount: attrs.budget.amount, currency: attrs.budget.currency, kind: "fixed" } : null;
+    const rawBudget = attrs.budget || null;
+    const budget = rawBudget ? { amount: rawBudget.amount, currency: rawBudget.currency, kind: "fixed" } : null;
     const stack = (attrs.skills || []).map((s) => s.name.toLowerCase());
     const hasScope = extractScope(full);
     const deadline = detectDeadline(full);
@@ -806,6 +844,7 @@ function analyzeFhProject(p) {
 async function runFhOnce(seen, toSend) {
     if (!FH_TOKEN) return;
 
+    const rates = await getFxRates();
     const skillIds = FH_SKILL_IDS ? FH_SKILL_IDS.split(",").map((s) => s.trim()) : [null];
     let totalFetched = 0;
     let matched = 0;
@@ -843,6 +882,13 @@ async function runFhOnce(seen, toSend) {
 
             matched++;
             const lead = analyzeFhProject(p);
+            // конвертируем бюджет в USD для скоринга
+            if (lead.budget && lead.budget.currency !== "USD") {
+                const usdAmount = toUSD(lead.budget.amount, lead.budget.currency, rates);
+                lead.budgetOriginal = { amount: lead.budget.amount, currency: lead.budget.currency };
+                lead.budget = { ...lead.budget, amount: usdAmount, currency: "USD" };
+                lead.score = qualityScore({ budget: lead.budget, deadline: lead.deadline, stack: lead.stack, type: lead.type, hasScope: lead.hasScope, equity: lead.equity, postRole: lead.postRole });
+            }
             appendLead(lead);
 
             if (lead.score >= CONFIG.tgMinScore) {
