@@ -324,14 +324,17 @@ function extractScope(text) {
     return /\b(build|fix|scrape|integrate|migrate|optimi[sz]e|refactor|telegram bot|automation|api|зробити|розробити|реалізувати|виправити|інтегрувати|підключити|перенести|автоматизувати|парсинг|парсити|налаштувати|сделать|разработать|реализовать|исправить|интегрировать|подключить|перенести|автоматизировать|парсинг|настроить)\b/i.test(text);
 }
 
-function qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole }) {
+function qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole, source }) {
     let score = 0;
     if (budget) {
         if (budget.kind === "hourly" && budget.amount >= 30) score += 4;
         else if (budget.kind === "monthly" && budget.amount >= 2000) score += 4;
         else if (budget.kind === "fixed" && budget.amount >= 200) score += 3;
+        else if (budget.kind === "fixed" && budget.amount >= 50) score += 2;
         else score += 1;
     }
+    // FH is pre-filtered freelance platform — no full-time noise
+    if (source === "freelancehunt") score += 1;
     if (deadline) score += 2;
     if (hasScope) score += 2;
     if (stack.length) score += 2;
@@ -814,12 +817,13 @@ function analyzeFhProject(p) {
     const rawBudget = attrs.budget || null;
     const budget = rawBudget ? { amount: rawBudget.amount, currency: rawBudget.currency, kind: "fixed" } : null;
     const stack = (attrs.skills || []).map((s) => s.name.toLowerCase());
-    const hasScope = extractScope(full);
+    // FH projects with skills listed are always scoped — employer knows what they want
+    const hasScope = (attrs.skills || []).length > 0 || extractScope(full);
     const deadline = detectDeadline(full);
     const type = "freelance";
     const equity = false;
     const postRole = "hiring";
-    const score = qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole });
+    const score = qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole, source: "freelancehunt" });
 
     return {
         id: `fh_${p.id}`,
@@ -887,7 +891,7 @@ async function runFhOnce(seen, toSend) {
                 const usdAmount = toUSD(lead.budget.amount, lead.budget.currency, rates);
                 lead.budgetOriginal = { amount: lead.budget.amount, currency: lead.budget.currency };
                 lead.budget = { ...lead.budget, amount: usdAmount, currency: "USD" };
-                lead.score = qualityScore({ budget: lead.budget, deadline: lead.deadline, stack: lead.stack, type: lead.type, hasScope: lead.hasScope, equity: lead.equity, postRole: lead.postRole });
+                lead.score = qualityScore({ budget: lead.budget, deadline: lead.deadline, stack: lead.stack, type: lead.type, hasScope: lead.hasScope, equity: lead.equity, postRole: lead.postRole, source: "freelancehunt" });
             }
             appendLead(lead);
 
