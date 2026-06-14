@@ -760,6 +760,93 @@ async function runWwrOnce(seen, toSend) {
     log(`WWR: получено ${totalFetched} вакансий, подошло ${totalMatched}`);
 }
 
+// ─── Freelancehunt ─────────────────────────────────────────────────────────
+
+const FH_TOKEN = ENV.FH_TOKEN || null;
+const FH_SKILL_IDS = ENV.FH_SKILL_IDS || null; // напр. "1,2,3" — фильтр по навыкам
+
+// Skill IDs нужных нам навыков на Freelancehunt:
+// 1=PHP, 2=JavaScript, 3=HTML/CSS, 6=MySQL, 16=WordPress, 18=Node.js,
+// 22=React, 26=OpenCart, 48=Next.js, 51=Shopify, 79=Laravel
+
+function analyzeFhProject(p) {
+    const attrs = p.attributes || {};
+    const title = attrs.name || "";
+    const body = attrs.description || "";
+    const full = `${title}\n${body}`;
+    const budget = attrs.budget ? { amount: attrs.budget.amount, currency: attrs.budget.currency, kind: "fixed" } : null;
+    const stack = (attrs.skills || []).map((s) => s.name.toLowerCase());
+    const hasScope = extractScope(full);
+    const deadline = detectDeadline(full);
+    const type = "freelance";
+    const equity = false;
+    const postRole = "hiring";
+    const score = qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole });
+
+    return {
+        id: `fh_${p.id}`,
+        source: "freelancehunt",
+        subreddit: "Freelancehunt",
+        author: attrs.employer?.login || "unknown",
+        link: (p.links?.self?.href || `https://freelancehunt.com/project/${p.id}`),
+        title,
+        body,
+        budget,
+        deadline,
+        type,
+        postRole,
+        stack,
+        hasScope,
+        equity,
+        score,
+    };
+}
+
+async function runFhOnce(seen, toSend) {
+    if (!FH_TOKEN) return;
+
+    const params = new URLSearchParams({ "page[limit]": "50" });
+    if (FH_SKILL_IDS) params.set("filter[skill_id]", FH_SKILL_IDS);
+
+    let res;
+    try {
+        res = await fetch(`https://api.freelancehunt.com/v2/projects?${params}`, {
+            headers: { Authorization: `Bearer ${FH_TOKEN}`, "Accept-Language": "ru" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+        logError("Freelancehunt: ошибка запроса:", e.message);
+        return;
+    }
+
+    const data = await res.json();
+    const projects = data.data || [];
+    let matched = 0;
+
+    for (const p of projects) {
+        const seenKey = `fh_${p.id}`;
+        if (seen.has(seenKey)) continue;
+
+        const attrs = p.attributes || {};
+        const text = `${attrs.name || ""}\n${attrs.description || ""}`;
+        if (!CONFIG.keywords.some((k) => keywordMatches(text, k))) {
+            seen.add(seenKey);
+            continue;
+        }
+
+        matched++;
+        const lead = analyzeFhProject(p);
+        appendLead(lead);
+
+        if (lead.score >= CONFIG.tgMinScore) {
+            toSend.push({ type: "lead", lead });
+        }
+        seen.add(seenKey);
+    }
+
+    log(`Freelancehunt: получено ${projects.length} проектов, подошло ${matched}`);
+}
+
 async function tgSend(text) {
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
     const res = await fetch(url, {
@@ -885,6 +972,15 @@ async function runOnce() {
             await runWwrOnce(seen, toSend);
         } catch (e) {
             logError("WWR: неожиданная ошибка:", e.message);
+        }
+    }
+
+    // Freelancehunt
+    if (FH_TOKEN) {
+        try {
+            await runFhOnce(seen, toSend);
+        } catch (e) {
+            logError("Freelancehunt: неожиданная ошибка:", e.message);
         }
     }
 
