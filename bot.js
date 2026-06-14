@@ -303,7 +303,7 @@ function detectBudget(text) {
 
 function detectDeadline(text) {
     if (!text) return false;
-    return /\b(asap|today|tomorrow|hours|urgent|now|24h|48h|deadline)\b/i.test(text);
+    return /\b(asap|today|tomorrow|hours|urgent|now|24h|48h|deadline|терміново|сьогодні|завтра|срочно|сегодня|дедлайн)\b/i.test(text);
 }
 
 function classifyType(text) {
@@ -321,7 +321,7 @@ function stackMatches(text) {
 
 function extractScope(text) {
     if (!text) return false;
-    return /\b(build|fix|scrape|integrate|migrate|optimi[sz]e|refactor|telegram bot|automation|api)\b/i.test(text);
+    return /\b(build|fix|scrape|integrate|migrate|optimi[sz]e|refactor|telegram bot|automation|api|зробити|розробити|реалізувати|виправити|інтегрувати|підключити|перенести|автоматизувати|парсинг|парсити|налаштувати|сделать|разработать|реализовать|исправить|интегрировать|подключить|перенести|автоматизировать|парсинг|настроить)\b/i.test(text);
 }
 
 function qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole }) {
