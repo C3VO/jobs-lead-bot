@@ -282,7 +282,9 @@ function scoreColor(s) {
 function budgetLabel(b) {
   if (!b) return '—';
   const kinds = { hourly: '/h', monthly: '/mo', fixed: ' fix' };
-  return `$${b.amount}${kinds[b.kind] || ''}`;
+  const syms = { USD: '$', EUR: '€', UAH: '₴', RUB: '₽' };
+  const sym = syms[b.currency] || '$';
+  return `${sym}${b.amount}${kinds[b.kind] || ''}`;
 }
 
 function renderLeads(leads){
