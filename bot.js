@@ -484,6 +484,7 @@ function formatLeadSummary(lead) {
             budget += ` (${origSym}${lead.budgetOriginal.amount})`;
         }
     }
+    // EUR показываем без конвертации — уже в нужной валюте
     const type = `Тип: ${lead.type}`;
     const score = `Скор: ${lead.score}/10`;
     return `${stack}\n${budget}\n${type}\n${score}`;
@@ -890,12 +891,15 @@ async function runFhOnce(seen, toSend) {
 
             matched++;
             const lead = analyzeFhProject(p);
-            // конвертируем бюджет в USD для скоринга
-            if (lead.budget && lead.budget.currency !== "USD") {
-                const usdAmount = toUSD(lead.budget.amount, lead.budget.currency, rates);
-                lead.budgetOriginal = { amount: lead.budget.amount, currency: lead.budget.currency };
-                lead.budget = { ...lead.budget, amount: usdAmount, currency: "USD" };
-                lead.score = qualityScore({ budget: lead.budget, deadline: lead.deadline, stack: lead.stack, type: lead.type, hasScope: lead.hasScope, equity: lead.equity, postRole: lead.postRole, source: "freelancehunt" });
+            // UAH → конвертируем в USD для скоринга и отображения
+            // EUR/USD → оставляем как есть, скор считаем через USD-эквивалент
+            if (lead.budget) {
+                const usdEquiv = toUSD(lead.budget.amount, lead.budget.currency, rates);
+                if (lead.budget.currency === "UAH") {
+                    lead.budgetOriginal = { amount: lead.budget.amount, currency: lead.budget.currency };
+                    lead.budget = { ...lead.budget, amount: usdEquiv, currency: "USD" };
+                }
+                lead.score = qualityScore({ budget: { ...lead.budget, amount: usdEquiv, currency: "USD" }, deadline: lead.deadline, stack: lead.stack, type: lead.type, hasScope: lead.hasScope, equity: lead.equity, postRole: lead.postRole, source: "freelancehunt" });
             }
             appendLead(lead);
 
