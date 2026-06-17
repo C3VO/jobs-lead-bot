@@ -425,28 +425,64 @@ async function translateIfNeeded(text) {
     return data.translatedText || text;
 }
 
+function decodeXmlEntities(str) {
+    return str
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&#32;/g, " ")
+        .replace(/&#[0-9]+;/g, " ");
+}
+
+function stripHtml(html) {
+    return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
 async function fetchSubredditNew(sub) {
-    const token = await getRedditToken();
-    const baseUrl = token ? "https://oauth.reddit.com" : "https://www.reddit.com";
-    const url = `${baseUrl}/r/${sub}/new.json?limit=${CONFIG.limitPerSub}`;
-
-    const headers = { "User-Agent": CONFIG.userAgent };
-    if (token) headers["Authorization"] = `bearer ${token}`;
-
-    const res = await fetch(url, { headers });
-
-    if (res.status === 401 && token) {
-        // токен протух раньше времени — сбрасываем и пробуем один раз без кэша
-        log(`Reddit 401 для r/${sub}, сбрасываю токен и повторяю...`);
-        redditAuth.token = null;
-        redditAuth.expiresAt = 0;
-        return fetchSubredditNew(sub);
-    }
-
+    const url = `https://www.reddit.com/r/${sub}/new/.rss?limit=100`;
+    const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; jobs-bot/1.0; +https://github.com/C3VO/jobs-lead-bot)" },
+    });
     if (!res.ok) throw new Error(`Fetch r/${sub} HTTP ${res.status}`);
-    const json = await res.json();
-    const children = json?.data?.children || [];
-    return children.map((x) => x.data);
+    const xml = await res.text();
+
+    const posts = [];
+    const entryRe = /<entry>([\s\S]*?)<\/entry>/g;
+    let m;
+    while ((m = entryRe.exec(xml)) !== null) {
+        const e = m[1];
+
+        // id is "t3_POSTID" format
+        const rawId = (/<id>(.*?)<\/id>/.exec(e) || [])[1] || "";
+        const id = rawId.replace(/^t\d_/, "");
+        if (!id) continue;
+
+        // permalink from <link href="https://www.reddit.com/r/.../comments/..."/>
+        const linkMatch = /<link[^>]+href="([^"]+\/comments\/[^"]+)"/.exec(e);
+        const linkHref = linkMatch ? linkMatch[1] : `https://www.reddit.com/r/${sub}/comments/${id}/`;
+        const permalink = linkHref.replace("https://www.reddit.com", "");
+
+        const title = decodeXmlEntities((/<title[^>]*>([\s\S]*?)<\/title>/.exec(e) || [])[1] || "");
+        const authorRaw = (/<name>(.*?)<\/name>/.exec(e) || [])[1] || "";
+        const author = authorRaw.replace("/u/", "").trim();
+        const published = (/<published>(.*?)<\/published>/.exec(e) || [])[1] || "";
+        const created_utc = published ? Math.floor(new Date(published).getTime() / 1000) : 0;
+
+        const contentMatch = /<content[^>]*>([\s\S]*?)<\/content>/.exec(e);
+        let selftext = "";
+        if (contentMatch) {
+            const html = decodeXmlEntities(contentMatch[1]);
+            // strip "submitted by ... to r/sub" footer Reddit appends
+            const cutoff = html.indexOf("submitted by");
+            selftext = stripHtml(cutoff > 0 ? html.slice(0, cutoff) : html);
+        }
+
+        posts.push({ id, title, selftext, author, created_utc, subreddit: sub, permalink, ups: 0, num_comments: 0 });
+    }
+    return posts;
 }
 
 function formatMessage(p, title, snippet, score = 0) {
