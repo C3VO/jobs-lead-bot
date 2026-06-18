@@ -987,7 +987,18 @@ async function runOnce() {
     let requestCount = 0;
     let fetchedCount = 0;
 
-    for (const sub of CONFIG.subreddits) {
+    // Rotate through subreddits 2 at a time to avoid Reddit rate limits on VPS IPs
+    const SUBS_PER_RUN = 2;
+    const subIndex = state.subIndex || 0;
+    const allSubs = CONFIG.subreddits;
+    const activeSubs = [];
+    for (let i = 0; i < SUBS_PER_RUN; i++) {
+        activeSubs.push(allSubs[(subIndex + i) % allSubs.length]);
+    }
+    state.subIndex = (subIndex + SUBS_PER_RUN) % allSubs.length;
+    log(`Reddit: проверяю [${activeSubs.join(", ")}] (${subIndex + 1}-${subIndex + SUBS_PER_RUN} из ${allSubs.length})`);
+
+    for (const sub of activeSubs) {
         if (requestCount >= CONFIG.maxRequestsPerRun) {
             log(`Достигнут лимит запросов за прогон (${CONFIG.maxRequestsPerRun}), останавливаюсь.`);
             break;
@@ -1089,7 +1100,7 @@ async function runOnce() {
     }
 
     saveSeen(seen);
-    saveState({ lastSeenUtc });
+    saveState({ lastSeenUtc, subIndex: state.subIndex });
 
     log(
         `Цикл завершён: получено ${fetchedCount} постов, подошло ${toSend.length}, отправлено ${CONFIG.dryRun ? 0 : toSend.length}${
