@@ -988,7 +988,7 @@ async function runOnce() {
     let fetchedCount = 0;
 
     // Rotate through subreddits 2 at a time to avoid Reddit rate limits on VPS IPs
-    const SUBS_PER_RUN = 2;
+    const SUBS_PER_RUN = 1;
     const subIndex = state.subIndex || 0;
     const allSubs = CONFIG.subreddits;
     const activeSubs = [];
