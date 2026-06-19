@@ -951,6 +951,119 @@ async function runFhOnce(seen, toSend) {
     log(`Freelancehunt: получено ${totalFetched} проектов, подошло ${matched}`);
 }
 
+// ─── Telegram channels (t.me/s/ public scraping) ───────────────────────────
+
+async function fetchTgChannel(channelName) {
+    const url = `https://t.me/s/${channelName}`;
+    const res = await fetch(url, {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+    });
+    if (!res.ok) throw new Error(`t.me/s/${channelName} HTTP ${res.status}`);
+    const html = await res.text();
+
+    const posts = [];
+    const blocks = html.split(/(?=<div[^>]+data-post=")/);
+
+    for (const block of blocks) {
+        const postMatch = /data-post="([^/]+)\/(\d+)"/.exec(block);
+        if (!postMatch) continue;
+        const [, ch, msgId] = postMatch;
+
+        const textMatch = /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]{1,3000})/.exec(block);
+        if (!textMatch) continue;
+
+        const text = stripHtml(decodeXmlEntities(textMatch[1])).trim();
+        if (!text || text.length < 10) continue;
+
+        const timeMatch = /datetime="([^"]+)"/.exec(block);
+        const created_utc = timeMatch ? Math.floor(new Date(timeMatch[1]).getTime() / 1000) : 0;
+
+        posts.push({ id: msgId, channelName: ch, text, created_utc, link: `https://t.me/${ch}/${msgId}` });
+    }
+
+    return posts;
+}
+
+function analyzeTgPost(post) {
+    const text = post.text || "";
+    const lines = text.split("\n").filter(Boolean);
+    const title = (lines[0] || "").slice(0, 150) || `TG #${post.id}`;
+    const full = text;
+
+    const budget = detectBudget(full);
+    const deadline = detectDeadline(full);
+    const type = classifyType(full);
+    const stack = stackMatches(full);
+    const hasScope = extractScope(full);
+    const equity = EQUITY_MARKERS.some((m) => full.toLowerCase().includes(m));
+    const postRole = "hiring";
+    const score = qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole });
+
+    return {
+        id: `tg_${post.channelName}_${post.id}`,
+        source: "telegram",
+        subreddit: `@${post.channelName}`,
+        author: `@${post.channelName}`,
+        link: post.link,
+        title,
+        body: full.slice(0, 2000),
+        created_utc: post.created_utc,
+        budget,
+        deadline,
+        type,
+        postRole,
+        stack,
+        hasScope,
+        equity,
+        score,
+    };
+}
+
+async function runTgChannelsOnce(seen, toSend) {
+    const channels = parseList("TG_CHANNELS", []);
+    if (!channels.length) return;
+
+    let totalFetched = 0;
+    let matched = 0;
+
+    for (const channelName of channels) {
+        let posts;
+        try {
+            posts = await fetchTgChannel(channelName);
+        } catch (e) {
+            logError(`TG @${channelName}: ошибка:`, e.message);
+            continue;
+        }
+
+        totalFetched += posts.length;
+
+        for (const post of posts) {
+            const seenKey = `tg_${channelName}_${post.id}`;
+            if (seen.has(seenKey)) continue;
+
+            if (!CONFIG.keywords.some((k) => keywordMatches(post.text, k))) {
+                seen.add(seenKey);
+                continue;
+            }
+
+            matched++;
+            const lead = analyzeTgPost(post);
+            appendLead(lead);
+
+            if (lead.score >= CONFIG.tgMinScore) {
+                toSend.push({ type: "lead", lead });
+            }
+            seen.add(seenKey);
+        }
+
+        if (CONFIG.requestDelayMs) await sleep(CONFIG.requestDelayMs);
+    }
+
+    log(`TG каналы: получено ${totalFetched} постов, подошло ${matched}`);
+}
+
 async function tgSend(text) {
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
     const res = await fetch(url, {
@@ -1096,6 +1209,15 @@ async function runOnce() {
             await runFhOnce(seen, toSend);
         } catch (e) {
             logError("Freelancehunt: неожиданная ошибка:", e.message);
+        }
+    }
+
+    // Telegram channels (t.me/s/ public scraping)
+    if (parseList("TG_CHANNELS", []).length) {
+        try {
+            await runTgChannelsOnce(seen, toSend);
+        } catch (e) {
+            logError("TG каналы: неожиданная ошибка:", e.message);
         }
     }
 
