@@ -333,8 +333,8 @@ function qualityScore({ budget, deadline, stack, type, hasScope, equity, postRol
         else if (budget.kind === "fixed" && budget.amount >= 50) score += 2;
         else score += 1;
     }
-    // FH is pre-filtered freelance platform — no full-time noise
-    if (source === "freelancehunt") score += 1;
+    // FH is pre-filtered freelance platform — no full-time noise, budget often hidden in attachments
+    if (source === "freelancehunt") score += 2;
     if (deadline) score += 2;
     if (hasScope) score += 2;
     if (stack.length) score += 2;
