@@ -1435,26 +1435,27 @@ async function sendReport(hours, sendToTg = true) {
     }
 }
 
-// ─── OpenAI-compatible AI (OpenModel.ai) ─────────────────────────────────
+// ─── AI via Anthropic-compatible API (openmodel.ai proxy) ─────────────────
 
 const AI_API_KEY = ENV.AI_API_KEY || null;
-const AI_BASE_URL = (ENV.AI_BASE_URL || "https://api.openmodel.ai/v1").replace(/\/$/, "");
-const AI_MODEL = ENV.AI_MODEL || "gpt-4o-mini";
+const AI_BASE_URL = (ENV.AI_BASE_URL || "https://api.openmodel.ai").replace(/\/$/, "");
+const AI_MODEL = ENV.AI_MODEL || "claude-haiku-4-5-20251001";
 const AI_CLASSIFY_SUBS = new Set(parseList("AI_CLASSIFY_SUBS", []));
 
 async function callAI(messages, maxTokens = 300) {
     if (!AI_API_KEY) throw new Error("AI_API_KEY не задан");
-    const res = await fetch(`${AI_BASE_URL}/chat/completions`, {
+    const res = await fetch(`${AI_BASE_URL}/v1/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${AI_API_KEY}`,
+            "x-api-key": AI_API_KEY,
+            "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({ model: AI_MODEL, max_tokens: maxTokens, messages }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     const data = await res.json();
-    return (data.choices?.[0]?.message?.content || "").trim();
+    return (data.content?.[0]?.text || "").trim();
 }
 
 async function needsDeveloperAI(post) {
