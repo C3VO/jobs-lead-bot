@@ -29,8 +29,6 @@ async function main() {
     const session = new StringSession("");
     const client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 5,
-        useWSS: false,
-        baseLogger: { warn: () => {}, error: console.error, info: () => {}, debug: () => {} },
     });
 
     console.log("Подключаюсь к Telegram...");
