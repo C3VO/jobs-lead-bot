@@ -366,7 +366,7 @@ function renderLeads(leads){
       <td style="font-size:12px;color:#94a3b8">${stackText}</td>
       <td style="white-space:nowrap">${budgetLabel(l.budget)}</td>
       <td><a href="${l.link}" target="_blank" rel="noopener">${flame}${l.title||''}</a></td>
-      <td style="font-size:12px;color:#64748b">${l.subreddit}</td>
+      <td style="font-size:12px;color:#64748b">${(l.source === 'reddit' || !l.source) ? 'r/' + l.subreddit : l.subreddit}</td>
       <td style="font-size:12px;white-space:nowrap">${fromNow(l.created_utc)}</td>
     `;
     tbody.appendChild(tr);
