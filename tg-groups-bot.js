@@ -160,6 +160,18 @@ async function searchAndJoin(client) {
         await sleep(3000);
         try {
             await client.invoke(new Api.channels.JoinChannel({ channel: chat }));
+
+            // Mute forever so the phone doesn't explode
+            try {
+                const inputPeer = await client.getInputEntity(chat.username || chat.id);
+                await client.invoke(new Api.account.UpdateNotifySettings({
+                    peer: new Api.InputNotifyPeer({ peer: inputPeer }),
+                    settings: new Api.InputPeerNotifySettings({ muteUntil: 2147483647 }),
+                }));
+            } catch (e) {
+                logErr(`Mute ${chat.title}: ${e.message}`);
+            }
+
             groups[id] = {
                 id,
                 name: chat.title || "Unknown",
@@ -169,7 +181,7 @@ async function searchAndJoin(client) {
                 leadsCount: 0,
                 msgCount: 0,
             };
-            log(`✓ Joined: ${chat.title} (@${username || id}) — ${chat.participantsCount} members`);
+            log(`✓ Joined+muted: ${chat.title} (@${username || id}) — ${chat.participantsCount} members`);
             joined++;
         } catch (e) {
             logErr(`Join "${chat.title}": ${e.message}`);
@@ -349,6 +361,18 @@ async function main() {
 
     await client.connect();
     log("TG connected");
+
+    // Mute all already-joined groups on startup
+    for (const g of Object.values(groups)) {
+        try {
+            const peer = await client.getInputEntity(g.username || g.id);
+            await client.invoke(new Api.account.UpdateNotifySettings({
+                peer: new Api.InputNotifyPeer({ peer }),
+                settings: new Api.InputPeerNotifySettings({ muteUntil: 2147483647 }),
+            }));
+        } catch {}
+    }
+    if (Object.keys(groups).length) log(`Muted ${Object.keys(groups).length} existing groups`);
 
     setupHandler(client);
 
