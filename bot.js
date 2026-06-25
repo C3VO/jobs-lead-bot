@@ -1231,7 +1231,6 @@ async function runOnce() {
             if ((p.created_utc || 0) > newestUtc) newestUtc = p.created_utc;
 
             if (seen.has(p.id)) continue;
-            if (!matchesKeywords(p)) { seen.add(p.id); continue; }
             if (isBlacklisted(p)) { seen.add(p.id); continue; }
 
             // [FOR HIRE] = competitor selling services, skip entirely
@@ -1240,6 +1239,23 @@ async function runOnce() {
             // forhire/freelance_forhire require [HIRING] or [FOR HIRE] tags — untagged posts are discussions
             const STRICT_SUBS = new Set(["forhire", "freelance_forhire"]);
             if (STRICT_SUBS.has(sub) && detectPostRole(p.title) === "unknown") {
+                seen.add(p.id);
+                continue;
+            }
+
+            // Discussion subs: AI decides if post needs a developer (replaces keyword filter)
+            // Regular subs: keyword matching
+            if (AI_CLASSIFY_SUBS.has(sub) && AI_API_KEY) {
+                let needs = false;
+                try {
+                    needs = await needsDeveloperAI(p);
+                    log(`AI [${sub}] "${p.title.slice(0, 60)}" → ${needs ? "YES" : "no"}`);
+                } catch (e) {
+                    logError(`AI classify r/${sub}:`, e.message);
+                    needs = matchesKeywords(p); // fallback to keyword matching on error
+                }
+                if (!needs) { seen.add(p.id); continue; }
+            } else if (!matchesKeywords(p)) {
                 seen.add(p.id);
                 continue;
             }
@@ -1419,22 +1435,48 @@ async function sendReport(hours, sendToTg = true) {
     }
 }
 
-// ─── Claude API ────────────────────────────────────────────────────────────
+// ─── OpenAI-compatible AI (OpenModel.ai) ─────────────────────────────────
 
-const CLAUDE_MODEL = ENV.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
+const AI_API_KEY = ENV.AI_API_KEY || null;
+const AI_BASE_URL = (ENV.AI_BASE_URL || "https://api.openmodel.ai/v1").replace(/\/$/, "");
+const AI_MODEL = ENV.AI_MODEL || "gpt-4o-mini";
+const AI_CLASSIFY_SUBS = new Set(parseList("AI_CLASSIFY_SUBS", []));
+
+async function callAI(messages, maxTokens = 300) {
+    if (!AI_API_KEY) throw new Error("AI_API_KEY не задан");
+    const res = await fetch(`${AI_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${AI_API_KEY}`,
+        },
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: maxTokens, messages }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    return (data.choices?.[0]?.message?.content || "").trim();
+}
+
+async function needsDeveloperAI(post) {
+    const title = post.title || "";
+    const body = (post.selftext || "").slice(0, 800);
+    const text = `${title}\n\n${body}`.trim();
+    const answer = await callAI(
+        [
+            { role: "system", content: "You are a classifier. Reply with YES or NO only." },
+            {
+                role: "user",
+                content: `Does this Reddit post describe someone who needs to hire a web developer, programmer, or get technical help building or fixing a website, web app, or online store?\n\n${text}`,
+            },
+        ],
+        5
+    );
+    return answer.toUpperCase().startsWith("YES");
+}
 
 async function generateReply(lead) {
-    const Anthropic = require("@anthropic-ai/sdk");
-    const client = new Anthropic.default({ apiKey: ENV.ANTHROPIC_API_KEY });
     const prompt = buildPrompt(lead);
-
-    const msg = await client.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 300,
-        messages: [{ role: "user", content: prompt }],
-    });
-
-    return (msg.content[0]?.text || "").trim();
+    return callAI([{ role: "user", content: prompt }], 300);
 }
 
 // ─── Telegram lead message with optional reply ────────────────────────────
