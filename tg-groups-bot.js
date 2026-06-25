@@ -21,6 +21,8 @@ const DATA_DIR = path.join(__dirname, "data");
 const GROUPS_FILE = path.join(DATA_DIR, "tg-groups.json");
 const BLACKLIST_FILE = path.join(DATA_DIR, "tg-blacklist.json");
 const LEADS_FILE = path.join(DATA_DIR, "leads.jsonl");
+const KEYWORDS_FILE = path.join(DATA_DIR, "tg-keywords.json");
+const DISCOVERY_FILE = path.join(DATA_DIR, "tg-discovery.json");
 
 const API_ID = parseInt(ENV.TG_API_ID || "0", 10);
 const API_HASH = ENV.TG_API_HASH || "";
@@ -39,9 +41,8 @@ const MIN_MEMBERS = parseInt(ENV.TG_GROUP_MIN_MEMBERS || "50", 10);
 const SEARCH_INTERVAL_MS = parseInt(ENV.TG_GROUP_SEARCH_HOURS || "6", 10) * 3600_000;
 const CLEANUP_INTERVAL_MS = 3600_000; // check every hour
 
-// Keywords to search for groups (finds groups by name/description)
-const SEARCH_KEYWORDS = (ENV.TG_GROUP_SEARCH_KEYWORDS || "").split(",").map(s => s.trim()).filter(Boolean);
-const DEFAULT_KEYWORDS = [
+// Seed keywords — AI will grow this list automatically
+const SEED_KEYWORDS = [
     "ищу разработчика", "нужен разработчик", "разработчик нужен",
     "ищу фрилансера", "нужен фрилансер",
     "заказать сайт", "сделать сайт", "создать сайт",
@@ -50,8 +51,9 @@ const DEFAULT_KEYWORDS = [
     "shopify разработчик", "woocommerce",
     "розробник потрібен", "шукаю розробника", "замовити сайт",
     "freelance developer", "hire developer",
+    "фриланс заказы", "биржа фриланса", "удалённая работа разработчик",
+    "php разработчик", "javascript разработчик", "react разработчик",
 ];
-const KEYWORDS = SEARCH_KEYWORDS.length ? SEARCH_KEYWORDS : DEFAULT_KEYWORDS;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -66,17 +68,45 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let groups = {};
 let blacklist = new Set();
 let lastSearchAt = 0;
+let learnedKeywords = []; // AI-generated keywords, grows over time
+let keywordIndex = 0;     // rotation cursor
+let discoveryQueue = new Set(); // @usernames found in messages to try joining
 
 function loadState() {
     try { groups = JSON.parse(fs.readFileSync(GROUPS_FILE, "utf8")); } catch { groups = {}; }
     try { blacklist = new Set(JSON.parse(fs.readFileSync(BLACKLIST_FILE, "utf8"))); } catch { blacklist = new Set(); }
-    log(`State loaded: ${Object.keys(groups).length} groups, ${blacklist.size} blacklisted`);
+    try {
+        const kw = JSON.parse(fs.readFileSync(KEYWORDS_FILE, "utf8"));
+        learnedKeywords = kw.keywords || [];
+        keywordIndex = kw.index || 0;
+    } catch { learnedKeywords = []; keywordIndex = 0; }
+    try { discoveryQueue = new Set(JSON.parse(fs.readFileSync(DISCOVERY_FILE, "utf8"))); } catch { discoveryQueue = new Set(); }
+    log(`State loaded: ${Object.keys(groups).length} groups, ${blacklist.size} blacklisted, ${learnedKeywords.length} learned keywords, ${discoveryQueue.size} in discovery queue`);
 }
 
 function saveState() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(GROUPS_FILE, JSON.stringify(groups, null, 2));
     fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...blacklist], null, 2));
+    fs.writeFileSync(KEYWORDS_FILE, JSON.stringify({ keywords: learnedKeywords, index: keywordIndex }, null, 2));
+    fs.writeFileSync(DISCOVERY_FILE, JSON.stringify([...discoveryQueue], null, 2));
+}
+
+// All unique keywords: seed + learned
+function allKeywords() {
+    const seen = new Set(SEED_KEYWORDS);
+    const extra = learnedKeywords.filter(k => !seen.has(k));
+    return [...SEED_KEYWORDS, ...extra];
+}
+
+// Pick next 10 keywords rotating through the full list
+function nextKeywordBatch() {
+    const all = allKeywords();
+    const start = keywordIndex % all.length;
+    const batch = [];
+    for (let i = 0; i < 10; i++) batch.push(all[(start + i) % all.length]);
+    keywordIndex = (start + 10) % all.length;
+    return batch;
 }
 
 function appendLead(lead) {
@@ -110,6 +140,45 @@ async function classifyMessage(text) {
     return (data.content?.[0]?.text || "").toUpperCase().startsWith("YES");
 }
 
+async function generateKeywords(msgText, groupName) {
+    if (!AI_API_KEY) return [];
+    const res = await fetch(`${AI_BASE_URL}/v1/messages`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "x-api-key": AI_API_KEY,
+            "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+            model: AI_MODEL,
+            max_tokens: 100,
+            messages: [{
+                role: "user",
+                content: `A message from Telegram group "${groupName}" turned out to be someone looking for a web developer:\n"${msgText.slice(0, 400)}"\n\nGenerate 5 short Telegram search queries (Russian/Ukrainian/English, 2-4 words each) to find other similar groups where clients post similar requests. One per line, no numbering, no explanations.`,
+            }],
+        }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const text = data.content?.[0]?.text || "";
+    return text.split("\n").map(s => s.trim()).filter(s => s.length > 3 && s.length < 50);
+}
+
+// Extract @usernames and t.me/links from message text
+function extractMentions(text) {
+    const found = new Set();
+    const re = /(?:@|t\.me\/)([a-zA-Z][a-zA-Z0-9_]{3,})/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const username = m[1].toLowerCase();
+        // Skip common non-group usernames
+        if (!["telegram", "tgstat", "combot", "joinchat"].includes(username)) {
+            found.add(username);
+        }
+    }
+    return found;
+}
+
 // ─── Telegram Bot send ────────────────────────────────────────────────────────
 
 async function sendToChat(html) {
@@ -125,15 +194,16 @@ async function sendToChat(html) {
 // ─── Group search & join ──────────────────────────────────────────────────────
 
 async function searchAndJoin(client) {
-    log(`Searching groups with ${KEYWORDS.length} keywords...`);
+    const batch = nextKeywordBatch();
+    const total = allKeywords().length;
+    log(`Searching groups: batch of ${batch.length} keywords (${total} total, ${learnedKeywords.length} learned)...`);
     const candidates = new Map(); // id → chat object
 
-    for (const kw of KEYWORDS) {
+    for (const kw of batch) {
         try {
             await sleep(1500);
             const result = await client.invoke(new Api.contacts.Search({ q: kw, limit: 20 }));
             for (const chat of (result.chats || [])) {
-                // Only megagroups (supergroups) — regular channels are write-only
                 if (!chat.megagroup) continue;
                 const id = String(chat.id);
                 if (!candidates.has(id)) candidates.set(id, chat);
@@ -143,7 +213,24 @@ async function searchAndJoin(client) {
         }
     }
 
-    log(`Found ${candidates.size} unique groups`);
+    // Also try joining groups from discovery queue (@mentions found in messages)
+    if (discoveryQueue.size > 0) {
+        log(`Processing ${discoveryQueue.size} discovered @mentions...`);
+        for (const username of [...discoveryQueue].slice(0, 10)) {
+            discoveryQueue.delete(username);
+            if (blacklist.has(username)) continue;
+            if (Object.values(groups).some(g => g.username === username)) continue;
+            try {
+                await sleep(2000);
+                const entity = await client.getEntity(username);
+                if (entity?.megagroup && (entity.participantsCount || 0) >= MIN_MEMBERS) {
+                    candidates.set(String(entity.id), entity);
+                }
+            } catch {}
+        }
+    }
+
+    log(`Found ${candidates.size} group candidates`);
     let joined = 0;
 
     for (const [id, chat] of candidates) {
@@ -267,6 +354,13 @@ function setupHandler(client) {
 
             group.msgCount++;
 
+            // Always extract @mentions for discovery — even non-lead messages
+            for (const username of extractMentions(msg.text)) {
+                if (!blacklist.has(username) && !Object.values(groups).some(g => g.username === username)) {
+                    discoveryQueue.add(username);
+                }
+            }
+
             let isLead = false;
             try {
                 isLead = await classifyMessage(msg.text);
@@ -281,6 +375,23 @@ function setupHandler(client) {
 
             group.leadsCount++;
             group.lastLeadAt = Date.now();
+
+            // AI generates new search keywords from this lead
+            try {
+                const newKws = await generateKeywords(msg.text, group.name);
+                const before = learnedKeywords.length;
+                for (const kw of newKws) {
+                    if (!SEED_KEYWORDS.includes(kw) && !learnedKeywords.includes(kw)) {
+                        learnedKeywords.push(kw);
+                    }
+                }
+                if (learnedKeywords.length > before) {
+                    log(`Learned ${learnedKeywords.length - before} new keywords: ${newKws.join(", ")}`);
+                }
+            } catch (e) {
+                logErr("Keyword generation:", e.message);
+            }
+
             saveState();
 
             const link = group.username
