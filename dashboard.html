@@ -69,6 +69,15 @@
       <option value="applied">applied</option>
       <option value="pass">pass</option>
     </select></label>
+    <label id="lblSource">Source: <select id="sourceFilter">
+      <option value="">any</option>
+      <option value="reddit">Reddit</option>
+      <option value="freelancehunt">Freelancehunt</option>
+      <option value="telegram">Telegram</option>
+      <option value="remotive">Remotive</option>
+      <option value="hn">HackerNews</option>
+      <option value="wwr">WWR</option>
+    </select></label>
     <label id="lblRole">Role: <select id="role">
       <option value="">any</option>
       <option value="hiring">hiring</option>
@@ -104,7 +113,7 @@
 const dict = {
   en: {
     title: 'Reddit Leads Dashboard',
-    hours: 'Hours', minScore: 'Min score', type: 'Type', role: 'Role', status: 'Status', limit: 'Limit', reload: 'Reload',
+    hours: 'Hours', minScore: 'Min score', type: 'Type', source: 'Source', role: 'Role', status: 'Status', limit: 'Limit', reload: 'Reload',
     any: 'any', freelance: 'freelance', job_offer: 'job offer', unknown: 'unknown',
     hiring: 'hiring', for_hire: 'for hire',
     sNew: 'new', sViewed: 'viewed', sApplied: 'applied', sPass: 'pass',
@@ -114,7 +123,7 @@ const dict = {
   },
   ru: {
     title: 'Дэшборд вакансий Reddit',
-    hours: 'Часы', minScore: 'Мин. скор', type: 'Тип', role: 'Роль', status: 'Статус', limit: 'Лимит', reload: 'Обновить',
+    hours: 'Часы', minScore: 'Мин. скор', type: 'Тип', source: 'Источник', role: 'Роль', status: 'Статус', limit: 'Лимит', reload: 'Обновить',
     any: 'любой', freelance: 'фриланс', job_offer: 'вакансия', unknown: 'неизв.',
     hiring: 'ищет', for_hire: 'предлагает',
     sNew: 'новый', sViewed: 'смотрел', sApplied: 'откликнулся', sPass: 'мимо',
@@ -167,6 +176,7 @@ function applyLang(){
   document.getElementById('lblHours').firstChild.textContent = t('hours')+': ';
   document.getElementById('lblMinScore').firstChild.textContent = t('minScore')+': ';
   document.getElementById('lblType').firstChild.textContent = t('type')+': ';
+  document.getElementById('lblSource').firstChild.textContent = t('source')+': ';
   document.getElementById('lblRole').firstChild.textContent = t('role')+': ';
   document.getElementById('lblLimit').firstChild.textContent = t('limit')+': ';
   document.getElementById('reload').textContent = t('reload');
@@ -195,6 +205,7 @@ async function load() {
   const type = document.getElementById('type').value;
   const role = document.getElementById('role').value;
   const statusFilter = document.getElementById('statusFilter').value;
+  const source = document.getElementById('sourceFilter').value;
   const limit = Number(document.getElementById('limit').value)||200;
   const qs = new URLSearchParams();
   if (hours) qs.set('hours', hours);
@@ -202,6 +213,7 @@ async function load() {
   if (type) qs.set('type', type);
   if (role) qs.set('role', role);
   if (statusFilter) qs.set('statusFilter', statusFilter);
+  if (source) qs.set('source', source);
   if (limit) qs.set('limit', limit);
   qs.set('sortBy', sortBy);
   qs.set('sortDir', sortDir);

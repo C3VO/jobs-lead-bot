@@ -102,6 +102,7 @@ app.get("/api/leads", (req, res) => {
 
     let leads = loadLeads(hours);
     const statusFilter = req.query.statusFilter;
+    const sourceFilter = req.query.source;
     const allStatuses = loadStatuses();
 
     leads = leads
@@ -109,6 +110,7 @@ app.get("/api/leads", (req, res) => {
         .filter((l) => (role ? (l.postRole || "unknown") === role : true))
         .filter((l) => (minScore ? (l.score || 0) >= minScore : true))
         .filter((l) => (statusFilter ? (allStatuses[l.id] || "new") === statusFilter : true))
+        .filter((l) => (sourceFilter ? (l.source || "reddit") === sourceFilter : true))
         .sort((a, b) => {
             const numSort = (av, bv) => sortDir * (bv - av);
             const strSort = (av, bv) => sortDir * (bv > av ? -1 : bv < av ? 1 : 0);
