@@ -1140,8 +1140,11 @@ async function runOnce() {
             // список /new отсортирован от свежего к старому — если упали до порога, дальше можно не идти
             if (p.created_utc && p.created_utc <= cutoffUtc) break;
 
+            // Двигаем cutoff для любого нового поста, даже если он не прошёл фильтры
+            if ((p.created_utc || 0) > newestUtc) newestUtc = p.created_utc;
+
             if (seen.has(p.id)) continue;
-            if (!matchesKeywords(p)) continue;
+            if (!matchesKeywords(p)) { seen.add(p.id); continue; }
             if (isBlacklisted(p)) { seen.add(p.id); continue; }
 
             // [FOR HIRE] = competitor selling services, skip entirely
@@ -1175,9 +1178,6 @@ async function runOnce() {
                 toSend.push({ type: "lead", lead, ruTitle, ruSnippet });
             }
             seen.add(p.id);
-
-            const createdUtc = p.created_utc || cutoffUtc;
-            if (createdUtc > newestUtc) newestUtc = createdUtc;
         }
 
         if (newestUtc > cutoffUtc) {
