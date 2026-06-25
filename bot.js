@@ -166,6 +166,9 @@ const BLACKLIST_PHRASES = [
     "revenue share only", "equity only", "unpaid", "volunteer",
     "do not work for", "warning from", "job market", "hiring report",
     "salary report", "i ran a scrape", "job listings this week",
+    // discussion posts from general subs (not job postings)
+    "i will not promote", "i will not advertise",
+    "feedback friday", "website review", "roast my", "[promo]",
 ];
 function isBlacklisted(post) {
     const text = normalize(`${post.title}\n${post.selftext || ""}`);
