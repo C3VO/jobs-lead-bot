@@ -30,11 +30,25 @@ async function main() {
     const client = new TelegramClient(session, apiId, apiHash, {
         connectionRetries: 5,
         useWSS: false,
+        baseLogger: { warn: () => {}, error: console.error, info: () => {}, debug: () => {} },
     });
 
+    console.log("Подключаюсь к Telegram...");
+    await client.connect();
+    console.log("Подключено. Отправляю код...\n");
+
     await client.start({
-        phoneNumber: () => ask("Номер телефона (+380...): "),
-        phoneCode: () => ask("Код из Telegram: "),
+        phoneNumber: async () => {
+            const phone = await ask("Номер телефона (+380...): ");
+            console.log(`\nОтправляю код на ${phone}...`);
+            return phone;
+        },
+        phoneCode: async () => {
+            console.log("Код отправлен! Проверь:");
+            console.log("  • Сообщение от 'Telegram' в приложении на телефоне/компьютере");
+            console.log("  • Или SMS если нет активных сессий\n");
+            return ask("Введи код: ");
+        },
         password: () => ask("2FA пароль (Enter если нет): "),
         onError: (err) => { console.error("Ошибка:", err.message); },
     });
