@@ -807,6 +807,90 @@ async function runWwrOnce(seen, toSend) {
     log(`WWR: получено ${totalFetched} вакансий, подошло ${totalMatched}`);
 }
 
+// ─── Remotive ──────────────────────────────────────────────────────────────
+
+const REMOTIVE_CATEGORIES = ["software-dev", "web-dev"];
+
+function analyzeRemotiveJob(job) {
+    const title = job.title || "";
+    const body = stripHtmlEntities(job.description || "").slice(0, 2000);
+    const full = `${title}\n${body}`;
+    const salaryStr = job.salary || "";
+
+    const budget = detectBudget(salaryStr) || detectBudget(full);
+    const tagStack = (job.tags || []).filter((t) => CONFIG.keywords.some((k) => normalize(t).includes(normalize(k))));
+    const stack = [...new Set([...stackMatches(full), ...tagStack])];
+    const hasScope = extractScope(full) || stack.length > 0;
+    const deadline = detectDeadline(full);
+    const equity = EQUITY_MARKERS.some((m) => full.toLowerCase().includes(m));
+    const type = ["contract", "freelance"].includes(job.job_type) ? "freelance" : "job_offer";
+    const postRole = "hiring";
+    const score = qualityScore({ budget, deadline, stack, type, hasScope, equity, postRole });
+
+    return {
+        id: `remotive_${job.id}`,
+        source: "remotive",
+        subreddit: "Remotive",
+        author: job.company_name || "unknown",
+        link: job.url,
+        title,
+        body,
+        created_utc: job.publication_date ? Math.floor(new Date(job.publication_date).getTime() / 1000) : Math.floor(Date.now() / 1000),
+        budget,
+        deadline,
+        type,
+        postRole,
+        stack,
+        hasScope,
+        equity,
+        score,
+    };
+}
+
+async function runRemotiveOnce(seen, toSend) {
+    let totalFetched = 0;
+    let matched = 0;
+
+    for (const category of REMOTIVE_CATEGORIES) {
+        let data;
+        try {
+            const res = await fetch(`https://remotive.com/api/remote-jobs?category=${category}`, {
+                headers: { "User-Agent": CONFIG.userAgent },
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            data = await res.json();
+        } catch (e) {
+            logError(`Remotive ${category}: ошибка:`, e.message);
+            continue;
+        }
+
+        const jobs = data.jobs || [];
+        totalFetched += jobs.length;
+
+        for (const job of jobs) {
+            const seenKey = `remotive_${job.id}`;
+            if (seen.has(seenKey)) continue;
+
+            const text = `${job.title}\n${stripHtmlEntities(job.description || "")}`;
+            if (!CONFIG.keywords.some((k) => keywordMatches(text, k))) {
+                seen.add(seenKey);
+                continue;
+            }
+
+            matched++;
+            const lead = analyzeRemotiveJob(job);
+            appendLead(lead);
+
+            if (lead.score >= CONFIG.tgMinScore) {
+                toSend.push({ type: "lead", lead });
+            }
+            seen.add(seenKey);
+        }
+    }
+
+    log(`Remotive: получено ${totalFetched} вакансий, подошло ${matched}`);
+}
+
 // ─── Currency conversion ────────────────────────────────────────────────────
 
 const fxCache = { rates: { USD: 1 }, updatedAt: 0 };
@@ -1200,6 +1284,15 @@ async function runOnce() {
             await runWwrOnce(seen, toSend);
         } catch (e) {
             logError("WWR: неожиданная ошибка:", e.message);
+        }
+    }
+
+    // Remotive
+    if (parseBool("REMOTIVE_ENABLED", false)) {
+        try {
+            await runRemotiveOnce(seen, toSend);
+        } catch (e) {
+            logError("Remotive: неожиданная ошибка:", e.message);
         }
     }
 
