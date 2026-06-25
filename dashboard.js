@@ -7,6 +7,8 @@ const PORT = process.env.DASHBOARD_PORT || 4000;
 const DATA_DIR = path.join(__dirname, "data");
 const LEADS_FILE = path.join(DATA_DIR, "leads.jsonl");
 const STATUSES_FILE = path.join(DATA_DIR, "statuses.json");
+const GROUPS_FILE = path.join(DATA_DIR, "tg-groups.json");
+const BLACKLIST_FILE = path.join(DATA_DIR, "tg-blacklist.json");
 
 function loadStatuses() {
     try { return JSON.parse(fs.readFileSync(STATUSES_FILE, "utf8")); } catch { return {}; }
@@ -146,6 +148,29 @@ app.get("/api/stats", (req, res) => {
     const hours = req.query.hours ? Number(req.query.hours) : null;
     const leads = loadLeads(hours);
     res.json(summarize(leads));
+});
+
+app.get("/api/tg-groups", (_req, res) => {
+    let groups = {};
+    let blacklist = [];
+    try { groups = JSON.parse(fs.readFileSync(GROUPS_FILE, "utf8")); } catch {}
+    try { blacklist = JSON.parse(fs.readFileSync(BLACKLIST_FILE, "utf8")); } catch {}
+    res.json({
+        groups: Object.values(groups).sort((a, b) => (b.leadsCount || 0) - (a.leadsCount || 0)),
+        blacklistCount: blacklist.length,
+    });
+});
+
+app.post("/api/tg-groups/leave", (req, res) => {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: "no id" });
+    let groups = {};
+    try { groups = JSON.parse(fs.readFileSync(GROUPS_FILE, "utf8")); } catch {}
+    if (groups[id]) {
+        groups[id].markedForLeave = true;
+        fs.writeFileSync(GROUPS_FILE, JSON.stringify(groups, null, 2));
+    }
+    res.json({ ok: true });
 });
 
 app.get("/", (_req, res) => {

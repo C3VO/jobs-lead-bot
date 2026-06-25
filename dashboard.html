@@ -49,10 +49,45 @@
     .bar-track { flex:1; background:#1f2937; border-radius:3px; height:6px; }
     .bar-fill { height:100%; border-radius:3px; }
     .bar-val { width:32px; text-align:right; color:#6b7280; font-size:11px; }
+    .tabs { display:flex; gap:4px; margin-bottom:16px; }
+    .tab-btn { background:#1f2937; color:#9ca3af; border:none; border-radius:8px; padding:8px 18px; cursor:pointer; font-size:14px; }
+    .tab-btn.active { background:#2563eb; color:#fff; }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+    .ttl-ok { color:#22c55e; }
+    .ttl-warn { color:#f59e0b; }
+    .ttl-dead { color:#ef4444; }
+    .leave-btn { background:#7f1d1d; color:#fca5a5; border:none; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer; }
+    .leave-btn:hover { background:#991b1b; }
   </style>
 </head>
 <body>
   <h1 id="title">Reddit Leads Dashboard</h1>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="leads">Leads</button>
+    <button class="tab-btn" data-tab="tg-groups">TG Groups</button>
+  </div>
+
+  <div id="pane-tg-groups" class="tab-pane">
+    <div id="tg-groups-stats" style="margin-bottom:12px;color:#9ca3af;font-size:13px"></div>
+    <div class="card">
+      <table class="table" id="groupsTable">
+        <thead><tr>
+          <th>Группа</th>
+          <th>Участников</th>
+          <th>Вступил</th>
+          <th>Осталось дней</th>
+          <th>Лидов</th>
+          <th>Сообщений</th>
+          <th>Последний лид</th>
+          <th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="pane-leads" class="tab-pane active">
   <div class="controls">
     <label id="lblHours">Hours: <input id="hours" type="number" value="72" min="1" style="width:80px"></label>
     <label id="lblMinScore">Min score: <input id="minScore" type="number" value="0" min="0" max="10" step="1" style="width:80px"></label>
@@ -109,6 +144,7 @@
       <tbody></tbody>
     </table>
   </div>
+  </div><!-- /pane-leads -->
 <script>
 const dict = {
   en: {
@@ -357,6 +393,88 @@ document.querySelector('#leadsTable tbody').addEventListener('click', async (e) 
 applyLang();
 updateSortUI();
 load();
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('pane-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'tg-groups') loadGroups();
+  };
+});
+
+// ─── TG Groups ────────────────────────────────────────────────────────────────
+const TTL_DAYS = 7;
+
+function daysAgo(ts) {
+  if (!ts) return null;
+  return Math.round((Date.now() - ts) / 86400000);
+}
+
+function daysLeft(g) {
+  const joinedDays = daysAgo(g.joinedAt) || 0;
+  if (g.lastLeadAt) {
+    const leadDays = daysAgo(g.lastLeadAt) || 0;
+    return TTL_DAYS - leadDays;
+  }
+  return TTL_DAYS - joinedDays;
+}
+
+async function loadGroups() {
+  const data = await fetch('/api/tg-groups').then(r => r.json());
+  const { groups, blacklistCount } = data;
+
+  document.getElementById('tg-groups-stats').innerHTML =
+    `Активных групп: <b style="color:#f8fafc">${groups.length}</b> &nbsp;·&nbsp; В чёрном списке: <b style="color:#6b7280">${blacklistCount}</b>`;
+
+  const tbody = document.querySelector('#groupsTable tbody');
+  tbody.innerHTML = '';
+
+  if (!groups.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#6b7280;text-align:center;padding:24px">Групп ещё нет — бот ищет...</td></tr>';
+    return;
+  }
+
+  groups.forEach(g => {
+    const left = daysLeft(g);
+    const leftCls = left > 3 ? 'ttl-ok' : left > 1 ? 'ttl-warn' : 'ttl-dead';
+    const leftStr = left <= 0 ? 'истёк' : `${left}д`;
+    const joinedStr = daysAgo(g.joinedAt) != null ? `${daysAgo(g.joinedAt)}д назад` : '—';
+    const lastLeadStr = g.lastLeadAt ? `${daysAgo(g.lastLeadAt)}д назад` : '—';
+    const link = g.username ? `https://t.me/${g.username}` : '#';
+    const name = `<a href="${link}" target="_blank" rel="noopener">${g.name}</a>`;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${name}${g.username ? `<span style="color:#475569;font-size:11px"> @${g.username}</span>` : ''}</td>
+      <td style="color:#9ca3af">${g.membersCount ? g.membersCount.toLocaleString() : '—'}</td>
+      <td style="color:#9ca3af">${joinedStr}</td>
+      <td><span class="${leftCls}">${leftStr}</span></td>
+      <td style="color:${g.leadsCount ? '#22c55e' : '#6b7280'};font-weight:${g.leadsCount ? 700 : 400}">${g.leadsCount || 0}</td>
+      <td style="color:#6b7280">${g.msgCount || 0}</td>
+      <td style="color:#9ca3af">${lastLeadStr}</td>
+      <td><button class="leave-btn" data-id="${g.id}">выйти</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.leave-btn');
+    if (!btn) return;
+    if (!confirm('Выйти из группы и добавить в чёрный список?')) return;
+    btn.disabled = true;
+    btn.textContent = '...';
+    await fetch('/api/tg-groups/leave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: btn.dataset.id }),
+    });
+    btn.closest('tr').style.opacity = '0.3';
+    btn.textContent = 'выходим';
+  });
+}
 </script>
 </body>
 </html>

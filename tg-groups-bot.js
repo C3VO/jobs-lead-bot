@@ -182,6 +182,27 @@ async function searchAndJoin(client) {
     lastSearchAt = Date.now();
 }
 
+// ─── Manual leave (flagged by dashboard) ─────────────────────────────────────
+
+async function processManualLeaves(client) {
+    const toLeave = Object.entries(groups).filter(([, g]) => g.markedForLeave);
+    for (const [id, g] of toLeave) {
+        log(`Manual leave: ${g.name}`);
+        try {
+            const peer = g.username || id;
+            const entity = await client.getInputEntity(peer);
+            await client.invoke(new Api.channels.LeaveChannel({ channel: entity }));
+        } catch (e) {
+            logErr(`Leave ${g.name}: ${e.message}`);
+        }
+        blacklist.add(id);
+        if (g.username) blacklist.add(g.username);
+        delete groups[id];
+        await sleep(1000);
+    }
+    if (toLeave.length) saveState();
+}
+
 // ─── Group cleanup ────────────────────────────────────────────────────────────
 
 async function cleanupGroups(client) {
@@ -342,8 +363,9 @@ async function main() {
         logStatus();
     }, 30 * 60 * 1000); // check every 30 min if it's time to search
 
-    // Periodic cleanup
+    // Periodic cleanup (TTL + manual leave requests)
     setInterval(async () => {
+        await processManualLeaves(client).catch((e) => logErr("ManualLeave:", e.message));
         await cleanupGroups(client).catch((e) => logErr("Cleanup:", e.message));
     }, CLEANUP_INTERVAL_MS);
 
