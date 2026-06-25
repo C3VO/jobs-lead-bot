@@ -23,6 +23,7 @@ const BLACKLIST_FILE = path.join(DATA_DIR, "tg-blacklist.json");
 const LEADS_FILE = path.join(DATA_DIR, "leads.jsonl");
 const KEYWORDS_FILE = path.join(DATA_DIR, "tg-keywords.json");
 const DISCOVERY_FILE = path.join(DATA_DIR, "tg-discovery.json");
+const SEEN_MSGS_FILE = path.join(DATA_DIR, "tg-seen-msgs.json");
 
 const API_ID = parseInt(ENV.TG_API_ID || "0", 10);
 const API_HASH = ENV.TG_API_HASH || "";
@@ -71,6 +72,7 @@ let lastSearchAt = 0;
 let learnedKeywords = []; // AI-generated keywords, grows over time
 let keywordIndex = 0;     // rotation cursor
 let discoveryQueue = new Set(); // @usernames found in messages to try joining
+let seenMsgs = new Set(); // processed message IDs — prevents duplicates on reconnect
 
 function loadState() {
     try { groups = JSON.parse(fs.readFileSync(GROUPS_FILE, "utf8")); } catch { groups = {}; }
@@ -81,6 +83,12 @@ function loadState() {
         keywordIndex = kw.index || 0;
     } catch { learnedKeywords = []; keywordIndex = 0; }
     try { discoveryQueue = new Set(JSON.parse(fs.readFileSync(DISCOVERY_FILE, "utf8"))); } catch { discoveryQueue = new Set(); }
+    try {
+        const seen = JSON.parse(fs.readFileSync(SEEN_MSGS_FILE, "utf8"));
+        seenMsgs = new Set(seen);
+        // Keep only last 5000 to avoid unbounded growth
+        if (seenMsgs.size > 5000) seenMsgs = new Set([...seenMsgs].slice(-5000));
+    } catch { seenMsgs = new Set(); }
     log(`State loaded: ${Object.keys(groups).length} groups, ${blacklist.size} blacklisted, ${learnedKeywords.length} learned keywords, ${discoveryQueue.size} in discovery queue`);
 }
 
@@ -90,6 +98,7 @@ function saveState() {
     fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...blacklist], null, 2));
     fs.writeFileSync(KEYWORDS_FILE, JSON.stringify({ keywords: learnedKeywords, index: keywordIndex }, null, 2));
     fs.writeFileSync(DISCOVERY_FILE, JSON.stringify([...discoveryQueue], null, 2));
+    fs.writeFileSync(SEEN_MSGS_FILE, JSON.stringify([...seenMsgs]));
 }
 
 // All unique keywords: seed + learned
@@ -349,6 +358,10 @@ function setupHandler(client) {
             if (!msg?.text || msg.text.length < 15) return;
 
             const chatId = String(event.chatId || "");
+            const msgKey = `${chatId}_${msg.id}`;
+            if (seenMsgs.has(msgKey)) return;
+            seenMsgs.add(msgKey);
+
             const group = groups[chatId];
             if (!group) return;
 
